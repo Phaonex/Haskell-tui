@@ -27,8 +27,13 @@ tui = do
 
 data TuiState = TuiState 
   {
-    tuiStatePaths :: NonEmptyCursor FilePath
+    tuiStatePaths :: NonEmptyCursor POC
   } deriving (Show, Eq)
+
+data POC = 
+  File FilePath 
+  | Directory FilePath
+  deriving (Show, Eq)
 
 data ResourceName =
   ResourceName
@@ -48,6 +53,13 @@ buildInitialState :: IO TuiState
 buildInitialState = do
   here <- getCurrentDirectory
   contents <- getDirectoryContents here
+  contents' <-
+    forM contents $ \fp -> do
+      e <- doesFileExist fp
+      pure $
+        if e
+          then File fp
+          else Directory fp
   case Ne.nonEmpty contents of
     Nothing -> die "There is no contents!"
     Just ne -> pure TuiState {tuiStatePaths = makeNonEmptyCursor ne}
@@ -64,11 +76,14 @@ drawTui ts =
           ,map (drawPath False) $ nonEmptyCursorNext nec
         ]
   ]
-drawPath :: Bool -> FilePath -> Widget n
-drawPath b = (if b
-                  then withAttr "selected"
-                  else id) . 
-              str
+drawPath :: Bool -> POC -> Widget n
+drawPath b poc = 
+  (if b
+        then withAttr "selected"
+        else id) $
+  case poc of
+    File fp -> withAttr "file" $ str fp
+    Directory fp -> withAttr "directory" $ str fp
 
 
 handleTuiEvent :: TuiState -> BrickEvent n e -> EventM n (Next TuiState)
@@ -89,12 +104,11 @@ handleTuiEvent s e =
                 Just nec' -> continue $ s {tuiStatePaths = nec'}
         EvKey KEnter [] -> do
           let fp = nonEmptyCursorCurrent $ tuiStatePaths s
-          isDirectory <- liftIO $ doesDirectoryExist fp
-          if isDirectory
-            then do
+          case fp of
+            File _ -> continue s
+            Directory fp -> do
                   liftIO $ setCurrentDirectory fp
                   s' <- liftIO buildInitialState
                   continue s'
-          else continue s
         _ -> continue s
     _ -> continue s
